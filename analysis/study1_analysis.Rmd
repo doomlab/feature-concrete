@@ -54,14 +54,6 @@ fl %>%
   )
 ```
 
-## Semantic distance
-
-TODO: cue-feature distance from embeddings or Lancaster sensorimotor norms.
-
-```{r sem-distance, eval=FALSE}
-# fl$sem_distance <- ...
-```
-
 ## Feature frequency
 
 Frequency of a feature within a cue (number of participants who listed it). Collocational frequency (for example from OpenSubtitles) is still TODO.
@@ -73,6 +65,25 @@ pairs <- fl %>%
   filter(!is.na(cue_concrete), !is.na(feature_concrete))
 
 nrow(pairs)
+```
+
+## Semantic distance (added to the cue-feature pairs)
+
+Cue-feature distance from the Lancaster sensorimotor norms (Lynott et al., 2020): cosine distance (1 - cosine similarity) between the 11-dimension sensorimotor vectors of the cue and the feature. Words with an all-zero vector have no defined cosine and are dropped. Embedding-based distance is still TODO.
+
+```{r sem-distance}
+lanc <- read_csv("../data/lancaster_norms.csv")
+lanc_mat <- lanc %>% select(-word) %>% as.matrix()
+rownames(lanc_mat) <- lanc$word
+lanc_mat <- lanc_mat[sqrt(rowSums(lanc_mat^2)) > 0, ]
+lanc_unit <- lanc_mat / sqrt(rowSums(lanc_mat^2))
+
+pairs <- pairs %>%
+  filter(cue %in% rownames(lanc_unit), word %in% rownames(lanc_unit)) %>%
+  mutate(sem_distance = 1 - rowSums(lanc_unit[cue, , drop = FALSE] * lanc_unit[word, , drop = FALSE]))
+
+nrow(pairs)
+summary(pairs$sem_distance)
 ```
 
 # Cue concreteness vs. feature concreteness
@@ -102,17 +113,17 @@ ggplot(cue_means, aes(cue_concrete, mean_feature_concrete)) +
 
 # Mixed model
 
-Semantic distance is not available yet, so this first model uses cue concreteness and feature frequency only. Feature concreteness is a property of the word, so it is constant across cues and people: a random intercept for feature word would absorb all of its variance and make the model degenerate. Only cue is random here.
+Feature concreteness is a property of the word, so it is constant across cues and people: a random intercept for feature word would absorb all of its variance and make the model degenerate. Only cue is random here. This is at the cue-feature pair level; participant-level data is still TODO.
 
 ```{r model}
 m1 <- lmer(
-  feature_concrete ~ cue_concrete + scale(feature_frequency) + (1 | cue),
+  feature_concrete ~ cue_concrete + scale(sem_distance) * scale(feature_frequency) + (1 | cue),
   data = pairs
 )
 summary(m1)
 ```
 
-TODO: add `sem_distance` and `feature_frequency:sem_distance`, and move to participant-level data with `(1 | subject_id)`.
+TODO: move to participant-level data with `(1 | subject_id)`.
 
 The planned structure was `(participant | cue)`; adjust the random effects if the model fails to converge.
 
