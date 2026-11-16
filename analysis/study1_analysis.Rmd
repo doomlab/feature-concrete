@@ -205,9 +205,66 @@ The planned structure was `(participant | cue)`; adjust the random effects if th
 
 # Chaining and surprisal
 
-TODO: can we talk about chaining? Calculate surprisal for cue -> feature -> feature transitions using `position` within each participant's answer.
+Each answer is an ordered list of features. Treating the cue as the start of the chain (cue -> feature 1 -> feature 2 -> ...), each feature after the first has a transition probability given the feature before it. Surprisal is -log2 P(feature | previous feature), estimated from all participants' chains pooled across cues. Counts are leave-one-out (the observed transition is removed from its own counts) with add-one smoothing over the feature vocabulary, so a transition seen only once is not scored as certain.
 
-```{r surprisal, eval=FALSE}
-# next-word prediction: conditional probability of a word given the previous
-# words within a 5-word window (for example "can" near "garbage")
+```{r chains}
+chains <- fl %>%
+  arrange(row_id, position) %>%
+  group_by(row_id) %>%
+  mutate(prev_word = lag(word)) %>%
+  ungroup() %>%
+  filter(!is.na(prev_word), word != prev_word)
+
+V <- n_distinct(chains$word)
+
+bigram <- chains %>% count(prev_word, word, name = "n_bigram")
+prev_n <- chains %>% count(prev_word, name = "n_prev")
+
+chains <- chains %>%
+  left_join(bigram, by = c("prev_word", "word")) %>%
+  left_join(prev_n, by = "prev_word") %>%
+  mutate(surprisal = -log2(((n_bigram - 1) + 1) / ((n_prev - 1) + V))) %>%
+  left_join(conc %>% select(prev_word = word, prev_concrete = concreteness), by = "prev_word") %>%
+  left_join(pairs %>% select(cue, word, cue_c), by = c("cue", "word")) %>%
+  left_join(conc %>% select(word, subtlex), by = "word") %>%
+  filter(!is.na(feature_concrete), !is.na(prev_concrete), !is.na(cue_c), !is.na(subtlex)) %>%
+  mutate(z_wordfreq = scale(log10(subtlex + 1))[, 1],
+         z_surprisal = scale(surprisal)[, 1],
+         z_position = scale(position)[, 1])
+
+nrow(chains)
+summary(chains$surprisal)
 ```
+
+## Do chains drift in concreteness?
+
+Does feature concreteness change with position in the answer (earlier vs. later features), over and above the cue?
+
+```{r drift}
+chains %>%
+  mutate(position_bin = pmin(position, 8)) %>%
+  group_by(position_bin) %>%
+  summarise(mean_feature_concrete = mean(feature_concrete), mean_surprisal = mean(surprisal), n = n())
+
+d1 <- lmer(feature_concrete ~ cue_c + (1 | cue) + (1 | subject_id), data = chains, REML = FALSE)
+d2 <- update(d1, . ~ . + z_position)
+d3 <- update(d2, . ~ . + cue_c:z_position)
+
+anova(d1, d2, d3)
+fixef(d3)
+```
+
+## Does surprisal predict feature concreteness?
+
+Transitions that are less expected given the previous feature, tested after accounting for the cue, position, the previous feature's concreteness, and the feature's overall word frequency (log10 SUBTLEX count from the Brysbaert norms). Rare words tend to be less concrete, so without the frequency control surprisal could just be picking up word frequency.
+
+```{r surprisal-model}
+s1 <- lmer(feature_concrete ~ cue_c + z_position + prev_concrete + z_wordfreq + (1 | cue) + (1 | subject_id),
+           data = chains, REML = FALSE)
+s2 <- update(s1, . ~ . + z_surprisal)
+
+anova(s1, s2)
+summary(s2)
+```
+
+TODO: next-word prediction with a corpus: conditional probability of a word given the previous words within a 5-word window (for example "can" near "garbage"), for example from OpenSubtitles.
