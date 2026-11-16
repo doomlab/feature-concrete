@@ -118,12 +118,17 @@ Feature concreteness is a property of the word, so it is constant across cues an
 Models are added in steps so each addition can be tested against the previous model (likelihood ratio tests on ML fits).
 
 ```{r hierarchical}
+# center cue concreteness at the mean across cues, so the intercept is the
+# expected feature concreteness for an average-concreteness cue
+cue_mean <- mean(cue_means$cue_concrete)
+
 pairs <- pairs %>%
-  mutate(z_dist = scale(sem_distance)[, 1],
+  mutate(cue_c = cue_concrete - cue_mean,
+         z_dist = scale(sem_distance)[, 1],
          z_freq = scale(feature_frequency)[, 1])
 
 m0 <- lmer(feature_concrete ~ 1 + (1 | cue), data = pairs, REML = FALSE)
-m1 <- lmer(feature_concrete ~ cue_concrete + (1 | cue), data = pairs, REML = FALSE)
+m1 <- lmer(feature_concrete ~ cue_c + (1 | cue), data = pairs, REML = FALSE)
 m2 <- update(m1, . ~ . + z_dist)
 m3 <- update(m2, . ~ . + z_freq)
 m4 <- update(m3, . ~ . + z_dist:z_freq)
@@ -167,19 +172,33 @@ The same hierarchy on the full long-form data (one row per participant, cue, and
 
 ```{r participant-data}
 pl <- fl %>%
-  inner_join(pairs %>% select(cue, word, sem_distance, feature_frequency, z_dist, z_freq),
+  inner_join(pairs %>% select(cue, word, sem_distance, feature_frequency, cue_c, z_dist, z_freq),
              by = c("cue", "word"))
 nrow(pl)
 ```
 
 ```{r participant-models}
-p1 <- lmer(feature_concrete ~ cue_concrete + (1 | cue) + (1 | subject_id), data = pl, REML = FALSE)
+p1 <- lmer(feature_concrete ~ cue_c + (1 | cue) + (1 | subject_id), data = pl, REML = FALSE)
 p2 <- update(p1, . ~ . + z_dist)
 p3 <- update(p2, . ~ . + z_freq)
 p4 <- update(p3, . ~ . + z_dist:z_freq)
 
 anova(p1, p2, p3, p4)
 summary(p4)
+```
+
+## Random slope of cue concreteness by participant
+
+Do people differ in how much their features track the cue's concreteness? A random slope for centered cue concreteness (`cue_c`) by participant tests this. A participant whose slope is near 0 lists features of similar concreteness whatever the cue; a larger slope means their features follow the cue more closely. Because cue concreteness is centered, the intercept is a participant's expected feature concreteness for an average cue, and the correlation between the participant intercept and slope shows whether people who list more concrete features overall also track the cue less (the regression-to-the-middle pattern from the cue-level analysis, now at the person level).
+
+```{r random-slope}
+p5 <- lmer(
+  feature_concrete ~ cue_c + z_dist * z_freq + (1 | cue) + (1 + cue_c | subject_id),
+  data = pl, REML = FALSE
+)
+
+anova(p4, p5)
+VarCorr(p5)
 ```
 
 The planned structure was `(participant | cue)`; adjust the random effects if the model fails to converge.
