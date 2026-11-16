@@ -161,6 +161,27 @@ summary(m4)
 
 TODO: move to participant-level data with `(1 | subject_id)`.
 
+# Participant-level models
+
+The same hierarchy on the full long-form data (one row per participant, cue, and feature), adding a random intercept for participant. Pair-level frequency and distance are joined back onto each row.
+
+```{r participant-data}
+pl <- fl %>%
+  inner_join(pairs %>% select(cue, word, sem_distance, feature_frequency, z_dist, z_freq),
+             by = c("cue", "word"))
+nrow(pl)
+```
+
+```{r participant-models}
+p1 <- lmer(feature_concrete ~ cue_concrete + (1 | cue) + (1 | subject_id), data = pl, REML = FALSE)
+p2 <- update(p1, . ~ . + z_dist)
+p3 <- update(p2, . ~ . + z_freq)
+p4 <- update(p3, . ~ . + z_dist:z_freq)
+
+anova(p1, p2, p3, p4)
+summary(p4)
+```
+
 The planned structure was `(participant | cue)`; adjust the random effects if the model fails to converge.
 
 # Chaining and surprisal
