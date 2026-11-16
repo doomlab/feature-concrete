@@ -38,14 +38,20 @@ fl %>%
 
 ## Concreteness norms
 
-TODO: add a concreteness norm file (for example Brysbaert et al., 2014) to `data/` and join it for both cues and features.
+Brysbaert et al. (2014) concreteness ratings (1 = abstract, 5 = concrete), joined to both cues and features.
 
-```{r concreteness, eval=FALSE}
-conc <- read_csv("../data/concreteness_norms.csv") # word, concreteness
+```{r concreteness}
+conc <- read_csv("../data/concreteness_norms.csv")
 
 fl <- fl %>%
-  left_join(conc %>% rename(cue = word, cue_concrete = concreteness), by = "cue") %>%
-  left_join(conc %>% rename(word = word, feature_concrete = concreteness), by = "word")
+  left_join(conc %>% select(cue = word, cue_concrete = concreteness), by = "cue") %>%
+  left_join(conc %>% select(word, feature_concrete = concreteness), by = "word")
+
+fl %>%
+  summarise(
+    cue_coverage = mean(!is.na(cue_concrete)),
+    feature_coverage = mean(!is.na(feature_concrete))
+  )
 ```
 
 ## Semantic distance
@@ -58,37 +64,55 @@ TODO: cue-feature distance from embeddings or Lancaster sensorimotor norms.
 
 ## Feature frequency
 
-TODO: feature frequency (from the data) and collocational frequency (for example calculated from OpenSubtitles).
+Frequency of a feature within a cue (number of participants who listed it). Collocational frequency (for example from OpenSubtitles) is still TODO.
 
-```{r frequency, eval=FALSE}
-# fl$feature_frequency <- ...
+```{r frequency}
+pairs <- fl %>%
+  group_by(cue, word, cue_concrete, feature_concrete) %>%
+  summarise(feature_frequency = n_distinct(subject_id), .groups = "drop") %>%
+  filter(!is.na(cue_concrete), !is.na(feature_concrete))
+
+nrow(pairs)
 ```
 
 # Cue concreteness vs. feature concreteness
 
-Using targets (features) as Y and cues as X, we expect a strong correlation but also a higher intercept (Dunning-Kruger-like pattern?).
+Using features as Y and cues as X, we expect a strong correlation but also a higher intercept (Dunning-Kruger-like pattern?). Cue-level means avoid weighting cues by how many features they have.
 
-```{r correlation, eval=FALSE}
-fl %>%
-  distinct(cue, word, .keep_all = TRUE) %>%
-  summarise(r = cor(cue_concrete, feature_concrete, use = "complete.obs"))
+```{r correlation}
+cue_means <- pairs %>%
+  group_by(cue, cue_concrete) %>%
+  summarise(mean_feature_concrete = mean(feature_concrete),
+            mean_feature_concrete_weighted = weighted.mean(feature_concrete, feature_frequency),
+            .groups = "drop")
 
-ggplot(fl, aes(cue_concrete, feature_concrete)) +
-  geom_point(alpha = .05) +
+cor.test(cue_means$cue_concrete, cue_means$mean_feature_concrete)
+
+m_cue <- lm(mean_feature_concrete ~ cue_concrete, data = cue_means)
+summary(m_cue)
+
+ggplot(cue_means, aes(cue_concrete, mean_feature_concrete)) +
+  geom_point(alpha = .4) +
   geom_smooth(method = "lm") +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  labs(x = "Cue concreteness", y = "Mean feature concreteness",
+       caption = "Dashed line: feature = cue") +
   theme_minimal()
 ```
 
 # Mixed model
 
-```{r model, eval=FALSE}
+Semantic distance is not available yet, so this first model uses cue concreteness and feature frequency only. Feature concreteness is a property of the word, so it is constant across cues and people: a random intercept for feature word would absorb all of its variance and make the model degenerate. Only cue is random here.
+
+```{r model}
 m1 <- lmer(
-  feature_concrete ~ cue_concrete + sem_distance + feature_frequency:sem_distance +
-    (1 | subject_id) + (1 | cue),
-  data = fl
+  feature_concrete ~ cue_concrete + scale(feature_frequency) + (1 | cue),
+  data = pairs
 )
 summary(m1)
 ```
+
+TODO: add `sem_distance` and `feature_frequency:sem_distance`, and move to participant-level data with `(1 | subject_id)`.
 
 The planned structure was `(participant | cue)`; adjust the random effects if the model fails to converge.
 
