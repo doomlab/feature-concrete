@@ -1,0 +1,102 @@
+---
+title: "Study 1: Concreteness of cues and semantic features"
+author: "The Doom Lab"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+library(tidyverse)
+library(lme4)
+library(lmerTest)
+```
+
+# Data
+
+Long-form feature listing data (one row per participant, cue, and feature word). All idiosyncratic responses are kept.
+
+```{r load-data}
+fl <- read_csv("../data/08_words.csv")
+glimpse(fl)
+```
+
+```{r data-summary}
+fl %>%
+  summarise(
+    participants = n_distinct(subject_id),
+    cues = n_distinct(cue),
+    features = n_distinct(word),
+    rows = n()
+  )
+```
+
+# Predictors
+
+## Concreteness norms
+
+TODO: add a concreteness norm file (for example Brysbaert et al., 2014) to `data/` and join it for both cues and features.
+
+```{r concreteness, eval=FALSE}
+conc <- read_csv("../data/concreteness_norms.csv") # word, concreteness
+
+fl <- fl %>%
+  left_join(conc %>% rename(cue = word, cue_concrete = concreteness), by = "cue") %>%
+  left_join(conc %>% rename(word = word, feature_concrete = concreteness), by = "word")
+```
+
+## Semantic distance
+
+TODO: cue-feature distance from embeddings or Lancaster sensorimotor norms.
+
+```{r sem-distance, eval=FALSE}
+# fl$sem_distance <- ...
+```
+
+## Feature frequency
+
+TODO: feature frequency (from the data) and collocational frequency (for example calculated from OpenSubtitles).
+
+```{r frequency, eval=FALSE}
+# fl$feature_frequency <- ...
+```
+
+# Cue concreteness vs. feature concreteness
+
+Using targets (features) as Y and cues as X, we expect a strong correlation but also a higher intercept (Dunning-Kruger-like pattern?).
+
+```{r correlation, eval=FALSE}
+fl %>%
+  distinct(cue, word, .keep_all = TRUE) %>%
+  summarise(r = cor(cue_concrete, feature_concrete, use = "complete.obs"))
+
+ggplot(fl, aes(cue_concrete, feature_concrete)) +
+  geom_point(alpha = .05) +
+  geom_smooth(method = "lm") +
+  theme_minimal()
+```
+
+# Mixed model
+
+```{r model, eval=FALSE}
+m1 <- lmer(
+  feature_concrete ~ cue_concrete + sem_distance + feature_frequency:sem_distance +
+    (1 | subject_id) + (1 | cue),
+  data = fl
+)
+summary(m1)
+```
+
+The planned structure was `(participant | cue)`; adjust the random effects if the model fails to converge.
+
+# Chaining and surprisal
+
+TODO: can we talk about chaining? Calculate surprisal for cue -> feature -> feature transitions using `position` within each participant's answer.
+
+```{r surprisal, eval=FALSE}
+# next-word prediction: conditional probability of a word given the previous
+# words within a 5-word window (for example "can" near "garbage")
+```
